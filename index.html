@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RealSense Hologram</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; font-family: system-ui, sans-serif; }
+  #hud { position: fixed; top: 12px; left: 14px; color: #8fd3ff; font-size: 13px; line-height: 1.5;
+         pointer-events: none; text-shadow: 0 0 6px #000; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="hud">connecting…</div>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const MAX_POINTS = 19200;   // 160x120, matches STRIDE=4 on the server
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 50);
+camera.position.set(0, 0, 0.3);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, -1.5);
+controls.enableDamping = true;
+
+const positions = new Float32Array(MAX_POINTS * 3);
+const colors = new Float32Array(MAX_POINTS * 3);
+const geom = new THREE.BufferGeometry();
+geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+geom.setDrawRange(0, 0);
+
+const points = new THREE.Points(
+  geom,
+  new THREE.PointsMaterial({ size: 0.012, vertexColors: true, sizeAttenuation: true })
+);
+points.rotation.x = Math.PI;   // RealSense: y down, z forward -> Three.js: y up, -z forward
+points.frustumCulled = false;
+scene.add(points);
+scene.add(new THREE.GridHelper(6, 12, 0x224466, 0x112233));
+
+const hud = document.getElementById("hud");
+let frames = 0, lastT = performance.now(), fps = 0, count = 0;
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => (hud.textContent = "live");
+  ws.onclose = () => { hud.textContent = "disconnected, retrying…"; setTimeout(connect, 1000); };
+  ws.onmessage = (e) => {
+    const buf = e.data;
+    const n = Math.min(new DataView(buf).getUint32(0, true), MAX_POINTS);
+    const pos = new Int16Array(buf, 4, n * 3);
+    const col = new Uint8Array(buf, 4 + n * 6, n * 3);
+    for (let i = 0; i < n * 3; i++) {
+      positions[i] = pos[i] * 0.001;   // mm -> m
+      colors[i] = col[i] / 255;
+    }
+    geom.attributes.position.needsUpdate = true;
+    geom.attributes.color.needsUpdate = true;
+    geom.setDrawRange(0, n);
+    count = n;
+    frames++;
+  };
+}
+connect();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  if (now - lastT > 1000) {
+    fps = Math.round((frames * 1000) / (now - lastT));
+    frames = 0; lastT = now;
+    if (hud.textContent !== "disconnected, retrying…")
+      hud.textContent = `live · ${fps} fps · ${count.toLocaleString()} points\ndrag = orbit · scroll = zoom · right-drag = pan`;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
