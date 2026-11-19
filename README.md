@@ -23,7 +23,7 @@ The Python server reads depth (and color, when available) frames from the camera
 ## Installation
 
 ```bash
-git clone https://github.com/<your-username>/realsense-hologram.git
+git clone https://github.com/geekcoder01/realsense-hologram.git
 cd realsense-hologram
 python3 -m venv .venv
 source .venv/bin/activate
